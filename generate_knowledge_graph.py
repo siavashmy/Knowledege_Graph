@@ -6,6 +6,7 @@ from pyvis.network import Network
 from dotenv import load_dotenv
 import os
 import asyncio
+import re
 
 # Load the .env file
 load_dotenv()
@@ -17,7 +18,7 @@ if not api_key:
 
 # Initialize Gemini LLM with API key
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     temperature=0,
     google_api_key=api_key
 )
@@ -38,8 +39,8 @@ def visualize_graph(graph_documents):
         width="100%",
         directed=True,
         notebook=False,
-        bgcolor="#222222",
-        font_color="white",
+        bgcolor="#FFFFFF",
+        font_color="black",
         filter_menu=True,
         cdn_resources='remote'
     )
@@ -59,13 +60,13 @@ def visualize_graph(graph_documents):
     for node_id in valid_node_ids:
         node = node_dict[node_id]
         try:
-            net.add_node(node.id, label=node.id, title=node.type, group=node.type)
+            net.add_node(node.id, label=node.id, title=node.type, color="lightblue")
         except:
             continue
 
     for rel in valid_edges:
         try:
-            net.add_edge(rel.source.id, rel.target.id, label=rel.type.lower())
+            net.add_edge(rel.source.id, rel.target.id, label=rel.type.lower(), font={"size": 20})
         except:
             continue
 
@@ -115,18 +116,66 @@ def generate_graph_from_triples(triples):
         height="1200px",
         width="100%",
         directed=True,
-        bgcolor="#222222",
-        font_color="white",
+        notebook=False,
+        bgcolor="#FFFFFF",
+        font_color="black",
         filter_menu=True,
         cdn_resources='remote'
     )
 
+    # Deduplicate nodes
+    seen_nodes = set()
+
+    def node_style(node_id: str):
+        # Goals first
+        if node_id.startswith(("EMI_", "DCI_")):
+            return {"color": "#A9D6E5", "title": "Goal"}
+
+        # Weights
+        if node_id.startswith("w_"):
+            return {"color": "#FFD27D", "title": "Weight"}
+
+        # Levels
+        if node_id.startswith("Level_"):
+            return {"color": "#B7E4C7", "title": "DesignLevel"}
+
+        # Explicit decision variables (only if you truly use them)
+        if node_id in {"Xf", "Dα", "S0"}:
+            return {"color": "#DDBEA9", "title": "DecisionVariable"}
+
+        # default: goals/others
+        return {"color": "#A9D6E5", "title": "Entity"}
+
     for subj, rel, obj in triples:
-        # Add nodes
-        net.add_node(subj, label=subj)
-        net.add_node(obj, label=obj)
-        # Add edge
-        net.add_edge(subj, obj, label=rel)
+        if subj not in seen_nodes:
+            style = node_style(subj)
+            net.add_node(subj, label=subj, color=style["color"], title=style["title"])
+            seen_nodes.add(subj)
+        if obj not in seen_nodes:
+            style = node_style(obj)
+            net.add_node(obj, label=obj, color=style["color"], title=style["title"])
+            seen_nodes.add(obj)
+
+        net.add_edge(subj, obj, label=rel, font={"size": 18})
+
+    # Improved physics and edge smoothing for nicer layout
+    net.set_options("""
+    {
+      "physics": {
+        "forceAtlas2Based": {
+          "gravitationalConstant": -80,
+          "centralGravity": 0.01,
+          "springLength": 180,
+          "springConstant": 0.07
+        },
+        "minVelocity": 0.75,
+        "solver": "forceAtlas2Based"
+      },
+      "edges": {
+        "smooth": { "type": "dynamic" }
+      }
+    }
+    """)
 
     output_file = "knowledge_graph.html"
     try:
